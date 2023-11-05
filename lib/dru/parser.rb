@@ -9,7 +9,7 @@ module Dru
         _VALUE_STATE_: ["required"],
         _SEPERATORS_: ["(", "{", "}", ")", ".", ";"],
         _OPERATORS_: ["parse", "coerce", "shape"],
-        _SCHEMA_BLOCK_: ["enum", "nativeEnum", "object", "array", "tuple"],
+        _SCHEMA_BLOCK_: ["enum", "nativeEnum", "array", "tuple", "object"],
         _COERCE_: ["coerce"],
         _PARSE_: ["parse"],
         _LITERAL_: ["literal"],
@@ -19,6 +19,7 @@ module Dru
         _COLON_: [":"]
       }
 
+      # HACK: Investigate cyclical objects?
       class ZodTokenStack
         include Dru::Stackable
       end
@@ -34,26 +35,53 @@ module Dru
           tok = stack.shift
           if tok.match?(/schema/i) || tok.match?(/object/i)
             {tok.to_s => squash_stack(stack)}
-          elsif tok.match?(/merge/i)
-            # HACK: `merge` requires a lookup for previous defined schemas
           elsif ZOD_SYNTAX[:_SCHEMA_BLOCK_].any? { |el| tok.match?(/"#{el}/i) }
             [tok.to_s => squash_stack(stack)]
           else # Attribute
+            # HACK: `merge` or `merge!` ?
             { tok.to_s => "val" }.merge(squash_stack(stack))
           end
         end
       end
 
-      # HACK: Run another time for extend?
-      def parse_string str
+      # HACK: Getting different results with the tokenizing?
+      def parse_str str
         conversion_stack = ZodTokenStack.new
         data = ZodTokenizer.tokenize_str(str: str)
         result = {}
         data.tokens.each_with_index do |token, idx|
-          peek_previous_token = (idx - 1 unless idx - 1 < 0) || 0
-          peek_next_token = (idx + 1 unless idx + 1 > data.tokens.size) || 0
-          if token.match?(/schema/i) && data.tokens[peek_previous_token].match?(/const/i) && conversion_stack.size == 0 # Parent Schema
+          peek_previous_token_idx = (idx - 1 unless idx - 1 < 0) || 0
+          peek_next_token_idx = (idx + 1 unless idx + 1 > data.tokens.size) || 0
+          if token.match?(/schema/i) && data.tokens[peek_previous_token_idx].match?(/const/i) && conversion_stack.size == 0 # Parent Schema
             conversion_stack.push(token)
+            next
+          end
+
+          if token.match?(/extend/i)
+            new_schema_id = data.tokens[idx-4]
+            conversion_stack.push new_schema_id
+            reference_schema_id = data.tokens[idx-2]
+            if squashed_schemas[reference_schema_id]
+              squashed_schemas[reference_schema_id].each do |k,v|
+                conversion_stack.push k.to_s
+              end
+            end
+          end
+
+          # zod `merge` is equivalent to `A.extend(B.shape)`
+          if token.match?(/merge/i)
+            new_schema_id = data.tokens[idx-4]
+            conversion_stack.push new_schema_id
+            # Push the attributes of the previously defined schema onto the stack by accessing squashed_schemas
+            extend_schema = data.tokens[idx+2]
+            if squashed_schemas[extend_schema]
+              squashed_schemas[extend_schema].each do |k,v|
+                conversion_stack.push k.to_s
+              end
+            end
+
+            # Avoid duplicate processing by blanking out the `extend_schema` just in case
+            data.tokens[idx+2] = ""
             next
           end
 
@@ -62,22 +90,47 @@ module Dru
             next
           end
 
-          if data.tokens[peek_next_token] == ":" # Attribute
-            conversion_stack.push(token)
+          if data.tokens == ":" # Attributes can refer to schemas that were previously defined
+            attr_value_idx = peek_next_token_idx
+            attr_value = data.tokens[attr_value_idx]
+            if attr_value.match?(/schema/i) && squashed_schemas[attr_value]
+              # Push attribute name
+              conversion_stack.push attr_value
+              squashed_schemas[attr_value].each do |k,v|
+                conversion_stack.push k.to_s
+              end
+            end
+
+            conversion_stack.push(data.tokens[peek_previous_token_idx])
+            data.tokens[attr_value_idx] = ""
             next
           end
 
-          if token.match?(/schema/i) && data.tokens[peek_previous_token].match?(/const/i) && conversion_stack.size > 0 # Next Parent Schema so squash
-            result = squash_stack conversion_stack
+          if token.match?(/schema/i) && data.tokens[peek_previous_token_idx].match?(/const/i) && conversion_stack.size > 0 # Next Parent Schema so squash
 
+            new_schema_id = conversion_stack.peek_first
+            result = squash_stack conversion_stack
             # The first element of a conversion stack should always be the name of a schema
-            squashed_schemas.fetch(conversion_stack.peek_first) { |new_schema| squashed_schemas[new_schema] = result }
-            $logger.warn "Conversion Stack size: #{conversion_stack.size}"
+            if !squashed_schemas.key?(new_schema_id)
+              squashed_schemas[new_schema_id] = result[new_schema_id]
+            end
 
             # After we squash the stack we lose the current parent unless we push it for processing now...
             conversion_stack.push(token) 
           end
         end
+
+        # If at this point another parent schema was never discovered so check if the conversion stack needs to be processed
+        if conversion_stack.size > 0
+          new_schema_id = conversion_stack.peek_first
+          result = squash_stack conversion_stack
+          # The first element of a conversion stack should always be the name of a schema
+          if !squashed_schemas.key?(new_schema_id)
+            squashed_schemas[new_schema_id] = result[new_schema_id]
+          end
+        end
+
+        result.merge squashed_schemas
       end
 
       def parse_files
@@ -114,9 +167,14 @@ module Dru
               conversion_stack.push(token) # After we squash we lose the current parent unless we push it now
             end
           end
+          result.merge squashed_schemas
           # HACK: Write the results of the file to a JSON hash
           break
         end
+      end
+
+      def validate_hash_structure hash
+        # HACK: Validate the hash structure
       end
     end
   end

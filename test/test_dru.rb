@@ -1,13 +1,69 @@
 # frozen_string_literal: true
 
-require "test_helper"
+require 'minitest'
+require 'test_helper'
 
-class TestDru < Minitest::Test
-  def test_that_it_has_a_version_number
-    refute_nil ::Dru::VERSION
+# Include everything in lib directory
+require File.join(File.expand_path("/home/sf/Development/dru/"), "lib", "dru.rb")
+Dir.glob(File.join(File.expand_path("/home/sf/Development/dru/"), "lib", "dru", "utils", "*.rb")).each do |file|
+  require "#{file}"
+end
+
+class Stack
+  include Dru::Stackable
+end
+
+class StackableTest < Minitest::Test
+
+  def setup
+    @stack = Stack.new
   end
 
-  def test_it_does_something_useful
-    assert false
+  def stack
+    @stack
   end
+
+  def test_push
+    assert(stack.size == 0)
+    stack.push "data"
+    assert(stack.size == 1)
+  end
+
+  def test_pop_empty
+    assert_nil stack.pop
+  end
+
+  def test_peek_empty
+    assert_nil stack.peek
+  end
+
+  def test_peek_with_data
+    old_size = stack.size
+    stack.push "data"
+    element_peeked = stack.peek
+    assert_equal old_size + 1, stack.size
+    refute_nil element_peeked
+  end
+
+  def test_clear
+    stack.clear
+    assert(stack.size == 0)
+  end
+end
+
+class ParserTest < Minitest::Test
+
+  def test_parser
+    Dru.configure do |config|
+      config.zod_schema_directories = Dir.glob(File.join("/home/sf/Development/nobee-saas/apps/saas/lib/shared/schemas/", "*.ts"))
+    end
+    Dru::Parser.call
+  end
+
+  def test_parser_parent; end
+
+  def test_parser_parent_child; end
+
+  def test_parser_family; end
+
 end

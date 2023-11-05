@@ -45,6 +45,16 @@ class StackableTest < Minitest::Test
     refute_nil element_peeked
   end
 
+  def test_peek_first_without_data
+    stack.push 1
+    stack.push 2
+    assert_equal stack.peek_first, 1
+  end
+
+  def test_peek_first_with_data
+    assert_nil stack.peek
+  end
+
   def test_clear
     stack.clear
     assert(stack.size == 0)
@@ -57,10 +67,28 @@ class ParserTest < Minitest::Test
     Dru.configure do |config|
       config.zod_schema_directories = Dir.glob(File.join("/home/sf/Development/nobee-saas/apps/saas/lib/shared/schemas/", "*.ts"))
     end
-    Dru::Parser.call
+    Dru::Parser.parse_files
   end
 
-  def test_parser_parent; end
+  def test_parser_parent
+    # We need a heredoc for the schema
+    schema = <<-ZODSCHEMA
+    import { z } from 'zod'
+
+    import { OptionalStringSchema } from './string-schema'
+
+    export const AgentInformationSchema = z.object({
+                                                     firstName: OptionalStringSchema,
+                                                     lastName: OptionalStringSchema,
+                                                     phone: OptionalStringSchema,
+                                                     brokerage: OptionalStringSchema,
+                                                     email: OptionalStringSchema,
+                                                   })
+    ZODSCHEMA
+
+    # Implement as a call to the parser
+
+  end
 
   def test_parser_parent_child; end
 

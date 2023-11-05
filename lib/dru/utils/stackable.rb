@@ -21,6 +21,11 @@ module Dru
       nil
     end
 
+    def peek_first
+      return stack[0] if stack.size > 0
+      nil
+    end
+
     def inspect
       stack.inspect
     end

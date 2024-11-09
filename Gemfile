@@ -11,6 +11,4 @@ gem "minitest", "~> 5.0"
 
 gem "standard", "~> 1.3"
 
-gem "tokenizers", "~> 0.4"
-
 gem "awesome_print", "= 1.9.2"
